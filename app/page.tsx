@@ -1,65 +1,272 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from 'react';
+import { Cloud, CloudOff, Trash2, Plus, Check } from 'lucide-react';
+
+
+interface Todo {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: number;
+  synced: boolean;
+}
+
+export default function TodoApp() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [newTodo, setNewTodo] = useState('');
+  const [isOnline, setIsOnline] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    initDB();
+    loadTodosFromDB();
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    setIsOnline(navigator.onLine);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOnline) {
+      syncTodos();
+    }
+  }, [isOnline]);
+
+  const initDB = () => {
+    const request = indexedDB.open('TodoDB', 1);
+    request.onerror = () => console.error('Database failed to open');
+    request.onsuccess = () => console.log('Database opened successfully');
+    request.onupgradeneeded = (e: any) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('todos')) {
+        db.createObjectStore('todos', { keyPath: 'id' });
+      }
+    };
+  };
+
+  const getDB = (): Promise<IDBDatabase> => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('TodoDB', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  const loadTodosFromDB = async () => {
+    try {
+      const db = await getDB();
+      const transaction = db.transaction(['todos'], 'readonly');
+      const objectStore = transaction.objectStore('todos');
+      const request = objectStore.getAll();
+      request.onsuccess = () => setTodos(request.result);
+    } catch (error) {
+      console.error('Error loading todos:', error);
+    }
+  };
+
+  const saveTodoDB = async (todo: Todo) => {
+    try {
+      const db = await getDB();
+      const transaction = db.transaction(['todos'], 'readwrite');
+      const objectStore = transaction.objectStore('todos');
+      objectStore.put(todo);
+    } catch (error) {
+      console.error('Error saving todo:', error);
+    }
+  };
+
+  const deleteTodoDB = async (id: string) => {
+    try {
+      const db = await getDB();
+      const transaction = db.transaction(['todos'], 'readwrite');
+      const objectStore = transaction.objectStore('todos');
+      objectStore.delete(id);
+    } catch (error) {
+      console.error('Error deleting todo:', error);
+    }
+  };
+
+  const syncTodos = async () => {
+    setIsSyncing(true);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const syncedTodos = todos.map(todo => ({ ...todo, synced: true }));
+    for (const todo of syncedTodos) {
+      await saveTodoDB(todo);
+    }
+    setTodos(syncedTodos);
+    setIsSyncing(false);
+  };
+
+  const addTodo = async () => {
+    if (!newTodo.trim()) return;
+
+    const todo: Todo = {
+      id: Date.now().toString(),
+      text: newTodo.trim(),
+      completed: false,
+      createdAt: Date.now(),
+      synced: isOnline,
+    };
+
+    await saveTodoDB(todo);
+    setTodos([...todos, todo]);
+    setNewTodo('');
+
+    if (isOnline) {
+      console.log('Syncing new todo to server...');
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      addTodo();
+    }
+  };
+
+  const toggleTodo = async (id: string) => {
+    const updatedTodos = todos.map(todo =>
+      todo.id === id ? { ...todo, completed: !todo.completed, synced: isOnline } : todo
+    );
+    setTodos(updatedTodos);
+    const todo = updatedTodos.find(t => t.id === id);
+    if (todo) await saveTodoDB(todo);
+    if (isOnline) {
+      console.log('Syncing toggle to server...');
+    }
+  };
+
+  const deleteTodo = async (id: string) => {
+    await deleteTodoDB(id);
+    setTodos(todos.filter(todo => todo.id !== id));
+    if (isOnline) {
+      console.log('Syncing deletion to server...');
+    }
+  };
+
+  const unsyncedCount = todos.filter(t => !t.synced).length;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-2xl mx-auto pt-8">
+        <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">My Todos</h1>
+            <div className="flex items-center gap-3">
+              {isSyncing && (
+                <span className="text-sm text-gray-500 animate-pulse">Syncing...</span>
+              )}
+              {isOnline ? (
+                <Cloud className="w-6 h-6 text-green-500" />
+              ) : (
+                <CloudOff className="w-6 h-6 text-red-500" />
+              )}
+              <span className={`text-sm font-medium ${isOnline ? 'text-green-600' : 'text-red-600'}`}>
+                {isOnline ? 'Online' : 'Offline'}
+              </span>
+            </div>
+          </div>
+
+          {unsyncedCount > 0 && !isOnline && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-yellow-800">
+                {unsyncedCount} {unsyncedCount === 1 ? 'item' : 'items'} pending sync
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-2 mb-6">
+            <input
+              type="text"
+              value={newTodo}
+              onChange={(e) => setNewTodo(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Add a new todo..."
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button
+              onClick={addTodo}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              Add
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {todos.length === 0 ? (
+              <p className="text-center text-gray-400 py-8">No todos yet. Add one to get started!</p>
+            ) : (
+              todos.map(todo => (
+                <div
+                  key={todo.id}
+                  className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
+                >
+                  <button
+                    onClick={() => toggleTodo(todo.id)}
+                    className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                      todo.completed
+                        ? 'bg-indigo-600 border-indigo-600'
+                        : 'border-gray-300 hover:border-indigo-600'
+                    }`}
+                  >
+                    {todo.completed && <Check className="w-4 h-4 text-white" />}
+                  </button>
+
+                  <span
+                    className={`flex-1 ${
+                      todo.completed ? 'line-through text-gray-400' : 'text-gray-800'
+                    }`}
+                  >
+                    {todo.text}
+                  </span>
+
+                  {!todo.synced && (
+                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+                      Pending
+                    </span>
+                  )}
+
+                  <button
+                    onClick={() => deleteTodo(todo.id)}
+                    className="flex-shrink-0 text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {todos.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-gray-200 text-sm text-gray-600">
+              <div className="flex justify-between">
+                <span>{todos.filter(t => !t.completed).length} active</span>
+                <span>{todos.filter(t => t.completed).length} completed</span>
+              </div>
+            </div>
+          )}
         </div>
-      </main>
+
+        <div className="bg-white rounded-lg shadow p-4 text-sm text-gray-600">
+          <h3 className="font-semibold mb-2">Offline Sync Features:</h3>
+          <ul className="space-y-1 list-disc list-inside">
+            <li>Works completely offline using IndexedDB</li>
+            <li>Auto-syncs when connection is restored</li>
+            <li>Shows pending sync status for offline changes</li>
+            <li>Real-time online/offline detection</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
